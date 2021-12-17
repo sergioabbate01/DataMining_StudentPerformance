@@ -1,0 +1,822 @@
+---
+title: "Project"
+author: "Sergio Abbate"
+date: "20/7/2021"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    collapsed: false
+    theme: journal
+    df_print: kable
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Preparation
+
+## Dataset Overview
+
+The Dataset that was selected for this project is a Student Performance Dataset. It includes 649 observations of students of two Portuguese Schools, and it contains both numeric and categorical attributes, describing information like demographics, academic features and family/life related. The outcome variable is the final year grade ‘G3’ (measure of performance) and is a numeric attribute. The dataset was found in Kaggle.
+
+## Project Objective
+
+Determine which are the most important variables that best describe a student grade. Which attributes play a bigger role in explaining/predicting a student grade? Are the academic factors, demographics, family related variables or the Life Balance variables? Which specifically? And how do they affect a student performance in general?
+
+## Data Type Conversion
+
+```{r}
+library(tidyverse)
+student = read_csv("student_performance.csv")
+
+#Variable Identification - Column names
+colnames(student)
+#Numeric Columns
+colnames(select_if(student, is.numeric))
+#character Columns
+colnames(select_if(student, is.character))
+
+# Convert character columns to factors
+
+student$school = as.factor(student$school)
+student$sex = as.factor(student$sex)
+student$address = as.factor(student$address)
+student$famsize = as.factor(student$famsize)
+student$Pstatus = as.factor(student$Pstatus)
+student$Mjob = as.factor(student$Mjob)
+student$Fjob = as.factor(student$Fjob)
+student$reason = as.factor(student$reason)
+student$guardian = as.factor(student$guardian)
+student$schoolsup = as.factor(student$schoolsup)
+student$famsup = as.factor(student$famsup)
+student$paid = as.factor(student$paid)
+student$activities = as.factor(student$activities)
+student$nursery = as.factor(student$nursery)
+student$higher = as.factor(student$higher)
+student$internet = as.factor(student$internet)
+student$romantic = as.factor(student$romantic)
+```
+
+The following 'numeric' columns are actually categories, since each level has it's own meaning, reason why I decided it is more appropriate to treat them as categories.
+
+```{r}
+#Convert numeric columns to categories
+student$Medu = as.factor(student$Medu)
+student$Fedu = as.factor(student$Fedu)
+student$traveltime = as.factor(student$traveltime)
+student$studytime = as.factor(student$studytime)
+```
+
+The following variables are numeric scales from 1 to 5. Since each number does not have a specific meaning (e.g. 2 = bad, 3 = normal, 4 = good), I decided to keep them as numeric. To some extent, it make sense to talk about averages of these variables and since every level does not have it's own meaning, I treat these variables as numeric:
+
+* famrel, freetime, goout, Dalc, Walc, health.
+
+```{r}
+# Numeric Columns
+colnames(select_if(student, is.numeric))
+# Factor Columns
+colnames(select_if(student, is.factor))
+```
+
+## Summary of variables
+
+```{r}
+# First summary of the columns
+summary(student)
+
+#Define other summarization functions
+
+summarize_factor = function(dataset) {
+  
+  dataset = select_if(dataset, is.factor)
+  summary.table = data.frame(Attribute = names(dataset))
+  
+  summary.table = summary.table %>% 
+    mutate('Missing Values' = apply(dataset, 2, function (x) sum(is.na(x))),
+           'Unique Values' = apply(dataset, 2, function (x) length(unique(x))),
+    )
+  summary.table
+}
+
+summarize_numeric = function(dataset) {
+  
+  dataset = select_if(dataset, is.numeric)
+  summary.table = data.frame(Attribute = names(dataset))
+  
+  summary.table = summary.table %>% 
+    mutate('Missing Values' = apply(dataset, 2, function (x) sum(is.na(x))),
+           'Unique Values' = apply(dataset, 2, function (x) length(unique(x))),
+           'Mean' = colMeans(dataset, na.rm = TRUE),
+           'Min' = apply(dataset, 2, function (x) min(x, na.rm = TRUE)),
+           'Max' = apply(dataset, 2, function (x) max(x, na.rm = TRUE)),
+           'SD' = apply(dataset, 2, function (x) sd(x, na.rm = TRUE))
+    )
+  summary.table
+}
+```
+
+```{r}
+summarize_numeric(student)
+summarize_factor(student)
+```
+
+**Observations:** Most students live in urban areas, with a family size greater than 3 members, Mother's and Father's education is almost evenly distributed (not too many high education levels). Most of the student's have a relatively low traveltime, however their reason of attendance to school is not necessarily 'close to home'. Most of them have no extra school support or paid classes. Most of them wish to take higher education. Most of them have a good family relationship, normal freetime and go-out time. Low alcohol consumption in students, high health status and low absences as well.
+
+**Observations:** Overall, the dataset is pretty clean, there aren't any unusual or illogical values in any of the columns, each column's meaning is clear and understandable and there aren't any NA values in the dataset.
+
+## Un-used and Correlated variables
+
+```{r}
+library(ggcorrplot)
+Corr_matrix = select_if(student, is.numeric) %>% cor()
+
+ggcorrplot(Corr_matrix, lab = TRUE, lab_size = 2.0, title = "Correlation Matrix Student Dataset")
+
+# Drop G1, G2, Dalc
+student = student %>% select(-G2, -G1, -Dalc)
+
+# Correlation between Father's and Mother's Education
+cor(as.numeric(student$Medu),as.numeric(student$Fedu))
+```
+
+**Observations:** 
+
+* High Correlations between G1, G2 and G3 as expected since G3 is somehow composed by G2 and G1. Since G3 is the real output variable and G1 and G2 are just the intermediate grades and not the final grade, I droped G1 and G2.
+
+* Relatively high correlation between Dalc and Walc (Daily vs Weekend Alcohol Consumption), so I decided to keep only one of them (Walc).
+
+* Another important and relatively high correlation found is between Mother's education and Father's education. To some extent is this relationship reasonable but I believe that these 2 variables do not neccesarily tell the same information so I kept both.
+
+
+```{r}
+# Differences between Grades from one school to the other
+
+student %>% group_by(school) %>% summarise(avg_grade = mean(G3))
+
+t_test = t.test(G3~school, data = student)
+t_test
+
+schools = student$school
+student = student %>% select(-school)
+```
+
+The dataset contains students from 2 schools. There is a statistically significant difference in the grades of both school. At this point I can consider 2 different subpopulations when performing several Data Mining Techniques to see if both schools behave differently. For the time being, I will ignore the school when performing the EDA phase and I will get back to it further on in the Project.
+
+# Logical Groupings
+
+For ease of understanding I decided to group the variables that are closely related in 4 different groups:
+
+* Demographics: sex, age, address.
+
+* Family: famsize, Pstatus, Medu, Fedu, Mjob, Fjob, guardian, famsup, famrel
+
+* Academic: reason, studytime, failures, schoolsup, paid, nursery, higher, absences
+
+* Life Balance: traveltime, activities, internet, romantic, freetime, goout,  Walc, health
+
+
+```{r}
+demo = student %>% select (sex, age, address, G3)
+family = student %>%  select (famsize, Pstatus, Medu, Fedu, Mjob, Fjob, guardian, famsup, famrel, G3)
+academic = student %>% select(reason, studytime, failures, schoolsup, paid, nursery, higher, absences, G3)
+life = student %>% select(traveltime, activities, internet, romantic, freetime, goout, Walc, health, G3)
+```
+
+# Univariate Analysis
+
+## Numeric Attributes
+
+```{r}
+library(gridExtra)
+
+# Histogram of numeric attributes
+n1 = ggplot(student, aes(x = age)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw() + ylab("")
+n2 = ggplot(student, aes(x = failures)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n3 = ggplot(student, aes(x = famrel)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n4 = ggplot(student, aes(x = freetime)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n5 = ggplot(student, aes(x = goout)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n6 = ggplot(student, aes(x = Walc)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n7 = ggplot(student, aes(x = health)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+n8 = ggplot(student, aes(x = absences)) + geom_histogram(color = "darkblue", fill = "lightblue") + theme_bw()+ ylab("")
+
+grid.arrange(n1, n2, n3, n4, n5, n6, n7, n8, nrow = 3, top = "Histogram of Numeric Variables")
+
+# Histogram of Grades - output variable
+ggplot(student, aes(x = G3, y = ..density..)) + geom_histogram(bins = 30, binwidth = 0.5, color = "darkblue", fill = "lightblue") + geom_line(stat = "density", color = "black", size = 1 ) + ylab("") + ggtitle("Histogram of Output Variable - G3") + theme_bw() + theme(axis.text.y=element_blank(), axis.ticks.y = element_blank())
+```
+
+**Observations:** Most students between an age of 15 and 18, very few older. Low number of failures in general, pretty good family relationship, normal freetime and go-out time, relatively low alcohol consumption and good health. Not too many absences but a fat tail starting at 10 absences. Grades are aparently normally distributed with a peak around 10-12 and some very low grades (0).
+
+## Categorical Attributes
+
+```{r}
+# Bar charts of factor attributes
+
+f1 = ggplot(student, aes(x = sex)) + geom_bar()+ theme_bw()+ ylab("")
+f2 = ggplot(student, aes(x = address)) + geom_bar()+ theme_bw()+ ylab("")
+f3 = ggplot(student, aes(x = famsize)) + geom_bar()+ theme_bw()+ ylab("")
+f4 = ggplot(student, aes(x = Pstatus)) + geom_bar()+ theme_bw()+ ylab("")
+f5 = ggplot(student, aes(x = Mjob)) + geom_bar() + theme(axis.text=element_text(size=3))+ theme_bw()+ ylab("")
+f6 = ggplot(student, aes(x = Fjob)) + geom_bar() + theme(axis.text=element_text(size=3))+ theme_bw()+ ylab("")
+f7 = ggplot(student, aes(x = reason)) + geom_bar() + theme(axis.text=element_text(size=3))+ theme_bw()+ ylab("")
+f8 = ggplot(student, aes(x = guardian)) + geom_bar()+ theme_bw()+ ylab("")
+f9 = ggplot(student, aes(x = schoolsup)) + geom_bar()+ theme_bw()+ ylab("")
+f10 = ggplot(student, aes(x = famsup)) + geom_bar()+ theme_bw()+ ylab("")
+f11 = ggplot(student, aes(x = paid)) + geom_bar()+ theme_bw()+ ylab("")
+f12 = ggplot(student, aes(x = activities)) + geom_bar()+ theme_bw()+ ylab("")
+f13 = ggplot(student, aes(x = nursery)) + geom_bar()+ theme_bw()+ ylab("")
+f14 = ggplot(student, aes(x = higher)) + geom_bar()+ theme_bw()+ ylab("")
+f15 = ggplot(student, aes(x = internet)) + geom_bar()+ theme_bw()+ ylab("")
+f16 = ggplot(student, aes(x = romantic)) + geom_bar() + theme_bw()+ ylab("")
+f17 = ggplot(student, aes(x = Medu)) + geom_bar() + theme_bw()+ ylab("")
+f18 = ggplot(student, aes(x = Fedu)) + geom_bar() + theme_bw()+ ylab("")
+f19 = ggplot(student, aes(x = traveltime)) + geom_bar() + theme_bw()+ ylab("")
+f20 = ggplot(student, aes(x = studytime)) + geom_bar() + theme_bw()+ ylab("")
+
+grid.arrange(f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,nrow = 3, top = "Bar Charts of Cagetorical Attributes (1)")
+
+grid.arrange(f13, f14, f15, f16, f17, f18, f19, f20, nrow = 3, top = "Bar Charts of Cagetorical Attributes (2)")
+```
+
+**Observations:** Most students female, urban, with a larger family size. Parents are mostly together, work as 'other'. Student's reason of attendance is mostly course preference, most of them with no extra school educational support but family educational support, mostly not paid. 50 % students have extra curricular activities and 50 % don't, most of them attended nursery school, want to pursue higher education, have internet access and no romantic relationship. Mother's and Father's education are evenly distributed, some high, some low, traveltime is in general low and so is studytime.
+
+# Bivariate Analysis
+
+Since we have over 30 columns, I will investigate some (not all) of the most important bivariate relations. However, further in this Project I will investigate deeper the relationship between the output variable G3 and the other variables.
+
+I subselected a set of 10 variables to investigate their interaction. I considered the academic variables to be highly important. I investigated variables like failures, absences, studytime, higher and schoolsup. In Life Balance I considered important freetime and Walc. One of the most important family related variables is Fedu and Medu (just picked Fedu) and regarding demographics I chose age and sex. 
+
+## Measure to Measure
+
+```{r}
+student_biv = student %>% select(failures, absences, studytime, higher, freetime, Walc, Fedu, age, sex, schoolsup)
+
+#Failures vs other variables
+m1 = ggplot(student_biv, aes(x = failures, y = absences)) + geom_jitter(color = "blue") + theme_bw()
+m2 = ggplot(student_biv, aes(x = failures, y = Walc)) + geom_jitter(color = "blue") + theme_bw()
+m3 = ggplot(student_biv, aes(x = failures, y = freetime)) + geom_jitter(color = "blue") + theme_bw()
+m4 = ggplot(student_biv, aes(x = failures, y = age)) + geom_jitter(color = "blue") + theme_bw()
+
+grid.arrange(m1, m2, m3, m4, nrow = 2, top = "Failures vs numeric attributes")
+
+#Absences vs other variables
+m1 = ggplot(student_biv, aes(x = absences, y = freetime)) + geom_jitter(color = "blue") + theme_bw()
+m2 = ggplot(student_biv, aes(x = absences, y = Walc)) + geom_jitter(color = "blue") + theme_bw()
+m3 = ggplot(student_biv, aes(x = absences, y = age)) + geom_jitter(color = "blue") + theme_bw()
+
+grid.arrange(m1, m2, m3, nrow = 2, layout_matrix=rbind(c(1,1,2,2), c(NA, 3, 3, NA)),top = "Absences vs numeric attributes")
+
+#Freetime , Walc and Age
+m1 = ggplot(student_biv, aes(x = freetime, y = Walc)) + geom_jitter(color = "blue") + theme_bw()
+m2 = ggplot(student_biv, aes(x = freetime, y = age)) + geom_jitter(color = "blue") + theme_bw()
+m3 = ggplot(student_biv, aes(x = Walc, y = age)) + geom_jitter(color = "blue") + theme_bw()
+
+grid.arrange(m1, m2, m3, nrow = 2, top = "Freetime, Walc and Age", layout_matrix=rbind(c(1,1,2,2), c(NA, 3, 3, NA)))
+
+```
+
+**Observations:** Not too many clear relationships and insights are drawn from these graphs, but some of them are:
+
+* Most of students with failures > 1 also have freetime > 3.
+
+* Students with failures are in general older (reasonable).
+
+* Students with higher absences are in general younger.
+
+## Category vs Category
+
+```{r}
+
+# Studytime vs categories
+c1 = ggplot(student_biv, aes(x = studytime)) + geom_bar(aes(fill = higher), position = "fill") + labs(y = "Percent") + theme_bw() 
+c2 = ggplot(student_biv, aes(x = studytime)) + geom_bar(aes(fill = Fedu), position = "fill") + labs(y = "Percent") + theme_bw() 
+c3 = ggplot(student_biv, aes(x = studytime)) + geom_bar(aes(fill = sex), position = "fill") + labs(y = "Percent") + theme_bw() 
+c4 = ggplot(student_biv, aes(x = studytime)) + geom_bar(aes(fill = schoolsup), position = "fill") + labs(y = "Percent") + theme_bw() 
+
+grid.arrange(c1, c2, c3, c4, nrow = 2, top = "Studytime vs Categorical Variables")
+
+
+# Higher vs categories
+c1 = ggplot(student_biv, aes(x = higher)) + geom_bar(aes(fill = Fedu), position = "fill") + labs(y = "Percent") + theme_bw() 
+c2 = ggplot(student_biv, aes(x = higher)) + geom_bar(aes(fill = sex), position = "fill") + labs(y = "Percent") + theme_bw() 
+c3 = ggplot(student_biv, aes(x = higher)) + geom_bar(aes(fill = schoolsup), position = "fill") + labs(y = "Percent") + theme_bw() 
+
+
+grid.arrange(c1, c2, c3, nrow = 2, top = "Higher vs Categorical Variables", layout_matrix=rbind(c(1,1,2,2), c(NA, 3, 3, NA)))
+
+# Fedu, sex and schoolsup vs categories
+c1 = ggplot(student_biv, aes(x = Fedu)) + geom_bar(aes(fill = sex), position = "fill") + labs(y = "Percent") + theme_bw() 
+c2 = ggplot(student_biv, aes(x = Fedu)) + geom_bar(aes(fill = schoolsup), position = "fill") + labs(y = "Percent") + theme_bw() 
+c3 = ggplot(student_biv, aes(x = sex)) + geom_bar(aes(fill = schoolsup), position = "fill") + labs(y = "Percent") + theme_bw() 
+
+
+grid.arrange(c1, c2, c3, nrow = 2, top = "Fedu, Sex and Schoolsup relationship ", layout_matrix=rbind(c(1,1,2,2), c(NA, 3, 3, NA)))
+```
+
+**Observations:** Some of the relationships and insights that are drawn from these graphs are:
+
+* Students that don't wish to get higher education also have less studytime (reasonable).
+
+* Students with higher studytime are mostly females.
+
+* Students with Fathers with higher levels of education are also the ones that wish to get higher education.
+
+* Student's who's fathers had low levels of education also need extra school educational support.
+
+## Measure vs Category
+
+```{r}
+#Higher vs measures
+mc1 = ggplot(student_biv) + geom_boxplot(aes(y = failures)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc2 = ggplot(student_biv) + geom_boxplot(aes(y = absences)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc3 = ggplot(student_biv) + geom_boxplot(aes(y = freetime)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc4 = ggplot(student_biv) + geom_boxplot(aes(y = Walc)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc5 = ggplot(student_biv) + geom_boxplot(aes(y = age)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+
+grid.arrange(mc1, mc2, mc3, mc4, mc5, nrow = 3, top = "Higher vs numeric attributes", layout_matrix=rbind(c(1,1,2,2), c(3, 3, 4, 4), c(NA,5,5,NA)))
+
+
+#Sex vs measures
+mc1 = ggplot(student_biv) + geom_boxplot(aes(y = failures)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc2 = ggplot(student_biv) + geom_boxplot(aes(y = absences)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc3 = ggplot(student_biv) + geom_boxplot(aes(y = freetime)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc4 = ggplot(student_biv) + geom_boxplot(aes(y = Walc)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc5 = ggplot(student_biv) + geom_boxplot(aes(y = age)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+
+grid.arrange(mc1, mc2, mc3, mc4, mc5, nrow = 3, top = "Sex vs numeric attributes", layout_matrix=rbind(c(1,1,2,2), c(3, 3, 4, 4), c(NA,5,5,NA)))
+
+
+#Schoolsup vs measures
+mc1 = ggplot(student_biv) + geom_boxplot(aes(y = failures)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc2 = ggplot(student_biv) + geom_boxplot(aes(y = absences)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc3 = ggplot(student_biv) + geom_boxplot(aes(y = freetime)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc4 = ggplot(student_biv) + geom_boxplot(aes(y = Walc)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc5 = ggplot(student_biv) + geom_boxplot(aes(y = age)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+
+grid.arrange(mc1, mc2, mc3, mc4, mc5, nrow = 3, top = "Schoolsup vs numeric attributes", layout_matrix=rbind(c(1,1,2,2), c(3, 3, 4, 4), c(NA,5,5,NA)))
+
+#Studytime vs measures
+mc1 = ggplot(student_biv) + geom_boxplot(aes(y = failures)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc2 = ggplot(student_biv) + geom_boxplot(aes(y = absences)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc3 = ggplot(student_biv) + geom_boxplot(aes(y = freetime)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc4 = ggplot(student_biv) + geom_boxplot(aes(y = Walc)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc5 = ggplot(student_biv) + geom_boxplot(aes(y = age)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+
+grid.arrange(mc1, mc2, mc3, mc4, mc5, nrow = 3, top = "Studytime vs numeric attributes", layout_matrix=rbind(c(1,1,2,2), c(3, 3, 4, 4), c(NA,5,5,NA)))
+
+#Fedu vs measures
+mc1 = ggplot(student_biv) + geom_boxplot(aes(y = failures)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc2 = ggplot(student_biv) + geom_boxplot(aes(y = absences)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc3 = ggplot(student_biv) + geom_boxplot(aes(y = freetime)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc4 = ggplot(student_biv) + geom_boxplot(aes(y = Walc)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+mc5 = ggplot(student_biv) + geom_boxplot(aes(y = age)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())
+
+grid.arrange(mc1, mc2, mc3, mc4, mc5, nrow = 3, top = "Fedu vs numeric attributes", layout_matrix=rbind(c(1,1,2,2), c(3, 3, 4, 4), c(NA,5,5,NA)))
+
+```
+
+**Observations:** Some of the relationships and insights that are drawn from these graphs are:
+
+* Most students with absences do not want to take higher education.
+
+* Higher levels of alcohol consumption seems to be related to not wanting to take higher education, to males more than females, to no extra educational support and to lower studytimes.
+
+* Students with higher studytimes are in general younger.
+
+# Bivariate (Output-variables) Analysis
+
+To make it more organized I divided this section of the bivariate analysis (output vs other variables) by the 4 logical groupings: Demographics, Family, Academic, Life Balance
+
+## Demographics
+
+```{r}
+#Numeric
+d1 = ggplot(demo, aes(x = G3, y = age)) + geom_jitter(color = "blue") + theme_bw()
+
+#Factor
+d2 = ggplot(demo) + geom_boxplot(aes(y = G3)) + facet_wrap(~sex, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Sex")
+d3 = ggplot(demo) + geom_boxplot(aes(y = G3)) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + facet_wrap(~address, nrow = 1) + ggtitle("Address")
+
+grid.arrange(d1, d2, d3, nrow = 2, layout_matrix = rbind(c(1, 1),c(2, 3)), top = "Grades vs Demographics Bivariate Analysis")
+
+```
+
+**Observations:** 
+
+* Best grades are not found in older students
+
+### Significance Testing
+
+```{r}
+# Sex
+t.test(G3~sex, data = student)
+
+# Address
+t.test(G3~address, data = student)
+```
+
+**Observations:** 
+
+* Statistically significant differences in grades across sex and address. Difference in mean is not really high though.
+
+## Family
+
+```{r}
+#Numeric
+f1 = ggplot(family, aes(x = G3, y = famrel)) + geom_jitter(color = "blue")+ theme_bw()
+
+#Factor
+f2 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~Medu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Medu")
+f3 =ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~Fedu, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Fedu")
+f4 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~famsize, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Famsize")
+f5 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~Pstatus, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Pstatus")
+f6 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~Mjob, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Mjob")
+f7 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~Fjob, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Fjob")
+f8 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~guardian, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Guardian")
+f9 = ggplot(family) + geom_boxplot(aes(y = G3)) + facet_wrap(~famsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Famsup")
+
+grid.arrange(f1, f2, f3, nrow = 2, top = "Grades vs Family Bivariate Analysis (1)",layout_matrix = rbind(c(1, 1),c(2, 3)) )
+
+grid.arrange(f4, f5, f6, f7, f8, f9, nrow = 3, top = "Grades vs Family Bivariate Analysis (2)")
+
+```
+
+**Observations:** 
+
+* In general, grades increase slightly as Mother and Father's Education increase.
+
+* Grades increase slightly when Mothers and/or Fathers are teachers
+
+### Significance Testing
+
+```{r}
+# Medu
+anova_medu = aov(G3~Medu, data = student)
+summary(anova_medu)
+TukeyHSD(anova_medu)
+
+# Fedu
+anova_fedu = aov(G3~Fedu, data = student)
+summary(anova_fedu)
+TukeyHSD(anova_fedu)
+
+# Mjob
+anova_mjob = aov(G3~Mjob, data = student)
+summary(anova_mjob)
+TukeyHSD(anova_mjob)
+
+# Fjob
+anova_fjob = aov(G3~Fjob, data = student)
+summary(anova_fjob)
+TukeyHSD(anova_fjob)
+
+```
+
+**Observations:** 
+
+* Statistically significant differences in grades between Medu 4-2 and Medu 4-1, as observed in the visualizations. All other combinations are not statistically significant.
+
+* Statistically significant differences in grades between Fedu 4-1 and Fedu 3-1. All other combinations are not statistically significant.
+
+* Statistically significant differences in grades between Mjob health-at_home, teacher-at_home and teacher-other. All other combinations are not statistically significant.
+
+* Statistically significant differences in grades between Fjob teacher-services. All other combinations are not statistically significant.
+
+## Academic
+
+```{r}
+#Numeric
+a1 = ggplot(academic, aes(x = G3, y = failures)) + geom_jitter(color = "blue")+ theme_bw()
+a2 = ggplot(academic, aes(x = G3, y = absences)) + geom_jitter(color = "blue")+ theme_bw()
+
+#Factor
+a3 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~studytime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Studytime")
+a4 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~reason, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Reason")
+a5 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~schoolsup, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank()) + ggtitle("Schoolsup")
+a6 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~paid, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Paid")
+a7 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~nursery, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Nursery")
+a8 = ggplot(academic) + geom_boxplot(aes(y = G3)) + facet_wrap(~higher, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Higher")
+
+grid.arrange(a1, a2, nrow = 2, top = "Grades vs Academic Bivariate Analysis - Numeric Attributes")
+
+grid.arrange(a3, a4, a5, a6, a7, a8, nrow = 3, top = "Grades vs Academic Bivariate Analysis - Categorical Attributes")
+
+```
+
+**Observations:** 
+
+* Best grades are within students that do not have any failure (reasonable).
+
+* In general, best grades are found in students with less than 10 absences.
+
+* Grades increase slightly as studytime increases.
+
+* Grades are considerably higher in students that wish to pursue higher 
+education than those who don't.
+
+### Significance Testing
+
+```{r}
+# studytime
+anova_studytime = aov(G3~studytime, data = student)
+summary(anova_studytime)
+TukeyHSD(anova_studytime)
+
+# higher
+t.test(G3~higher, data = student)
+
+```
+
+**Observations:**
+
+* Statistically significant differences in grades between studytime 1 and 2,3,4. All other combinations are not statistically significant.
+
+* Statistically significant difference in grades between higher = yes and higher = no. Group means difference is high.
+
+## Life Balance
+
+```{r}
+#Numeric
+l1 = ggplot(life, aes(x = G3, y = freetime)) + geom_jitter(color = "blue")+ theme_bw()
+l2 = ggplot(life, aes(x = G3, y = goout)) + geom_jitter(color = "blue")+ theme_bw()
+l3 = ggplot(life, aes(x = G3, y = Walc)) + geom_jitter(color = "blue")+ theme_bw()
+l4 = ggplot(life, aes(x = G3, y = health)) + geom_jitter(color = "blue")+ theme_bw()
+
+#Factor
+l5 = ggplot(life) + geom_boxplot(aes(y = G3)) + facet_wrap(~traveltime, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Traveltime")
+l6 = ggplot(life) + geom_boxplot(aes(y = G3)) + facet_wrap(~activities, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Activities")
+l7 = ggplot(life) + geom_boxplot(aes(y = G3)) + facet_wrap(~internet, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Internet")
+l8 = ggplot(life) + geom_boxplot(aes(y = G3)) + facet_wrap(~romantic, nrow = 1) + theme(axis.text.x=element_blank(), axis.ticks.x = element_blank())+ ggtitle("Romantic")
+
+grid.arrange(l1, l2, l3, l4, nrow = 2, top = "Grades vs Life Balance Bivariate Analysis - Numeric Attributes")
+
+grid.arrange(l5, l6, l7, l8, nrow = 2, top = "Grades vs Life Balance Bivariate Analysis - Categorical Attributes")
+
+```
+
+**Observations:** 
+
+* Grades are to consistently lower for students with a high traveltime.
+
+* No clear difference in grades for the other Life related attributes.
+
+### Significance Testing
+
+```{r}
+# studytime
+anova_traveltime = aov(G3~traveltime, data = student)
+summary(anova_traveltime)
+TukeyHSD(anova_traveltime)
+
+# internet
+t.test(G3~internet, data = student)
+```
+
+**Observations:**
+
+* No statistically significant differences in grades between traveltimes.
+
+* Statistically significant difference in grades between internet = yes and higher = no. Group means difference is not high though.
+
+I did not investigate the relationship between all categories vs categories since our outcome variable is not categorical. 
+
+# Data Mining Techniques - Analytical Ready Data
+
+Right now, I got a better understanding of the data and the variables. There weren't any major Data Quality Issues and I droped the variables that were not useful for the analysis. The data is ready for modelling. Depending on the data mining method, I performed additional changes to the dataset.
+
+I performed 3 Data Mining techniques to better understand the data and the relationships between the variables:
+* Clustering
+
+* Principal Components Analysis
+
+* Regression (Trees)
+
+# Clustering
+
+```{r}
+# Scale the numeric attributes
+student_scaled = select_if(student,is.numeric) %>% select(-G3) %>%  scale() %>% as.data.frame()
+
+# Create binary variables to Categories
+student_factors = select_if(student,is.factor)
+library(fastDummies)
+
+student_dummies = dummy_cols(student_factors, remove_selected_columns = T, remove_first_dummy = T)
+
+#Scaled dataset with Dummy variables
+student_clust = as.tibble(cbind(student_scaled, student_dummies))
+
+# Check if the data has natural clusters in it
+library(clustertend)
+library(cluster)
+hopkins(student_scaled,20)
+```
+
+There are natural clusters in the data: hopkins statistic below 0.5
+
+```{r}
+# select the best number of clusters to use
+totwss = tibble(num_clusters = 1:10, tot_withinss = 0)
+for (i in 1:10) {
+  km = kmeans(student_clust, i, nstart=10)
+  totwss$tot_withinss[i] = km$tot.withinss
+}
+ggplot(totwss, aes(x = num_clusters, y=tot_withinss)) + geom_line() + geom_point()
+```
+
+It seems that either 4 or 5 could be a good choice for the number of clusters.
+
+```{r}
+#I used the kmeans clustering algorithm 
+
+student_clust = kmeans(student_clust,4,nstart = 10)
+student$cluster = student_clust$cluster
+
+## Results of the clustering
+
+# Numeric results
+
+num_results = student %>% group_by(cluster) %>% summarize(Size = n(), G3 = mean(G3), age = mean(age), failures = mean(failures), famrel = mean(famrel), freetime = mean(freetime), goout = mean(goout), Walc = mean(Walc), health = mean(health), absences = mean(absences)) %>% round(2)
+
+#transpose for better displaying
+as_tibble(cbind(nms = names(num_results), t(num_results)))
+
+g1 = ggplot(student, aes(x = factor(cluster), y = G3)) + geom_boxplot() +   stat_summary(fun = mean, geom = "point", size = 3, color = "red")
+g2 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=age))
+g3 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=failures)) 
+g4 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=famrel)) 
+g5 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=freetime))
+g6 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=goout)) 
+g7 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=Walc)) 
+g8 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=health))
+g9 = ggplot(student) + geom_boxplot(aes(x= factor(cluster), y=absences)) 
+
+grid.arrange(g2, g3, g4, g5, g6, g7, g8, g9,nrow=3)
+
+g1
+
+#Define Mode function
+Mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+cat_results = student %>% group_by(cluster) %>% summarise(Size = n(), sex = Mode(sex), address = Mode(address), famsize = Mode(famsize), Pstatus = Mode(Pstatus), Mjob = Mode(Mjob), Fjob = Mode(Fjob), reason = Mode(reason), guardian = Mode(guardian), schoolsup = Mode(schoolsup), famsup = Mode(famsup), paid = Mode(paid), Medu = Mode(Medu), Fedu = Mode(Fedu), traveltime = Mode(traveltime), studytime = Mode(studytime), activities = Mode(activities), nursery = Mode(nursery), higher = Mode(higher), internet = Mode(internet), romantic = Mode(romantic))
+
+as_tibble(cbind(nms = names(cat_results), t(cat_results)))
+```
+
+**Clusters Description:**
+
+* Cluster 1: Majority of students, have higher grades, youngest students, almost no failures, absences or Alcohol consumption, highest Mother's education and females. Good family relationship and health but not differentiable from the other cluster in all the remaining variables. In general, really good, responsible, young students with good family relation and education.
+
+* Cluster 2: Second highest number of students, have the highest grades in average. Similar characteristics as cluster 1 (young, females, no failures, absences or alcohol consumption). However they go out more frequently, have the worst health among the 4 clusters, and their Mother's education is not that high as cluster 1. In general, best students, responsible, young but maybe a little more loose, with worse health and more go out time and worst family education.  with good family relation and education
+
+* Cluster 3: Relatively good grades, high go-out times and Alcohol consumption, several absences, mostly males. All the other variables are to some extent the same as the other clusters, no differentiation.
+
+* Cluster 4: Minority, oldest students with the worst grades (pretty low). High number of failures and absences. However no high alcohol consumption or go-out times. Probably the students that repeated courses one or many times. Mostly females, with the lowest mother and father's education and study time among the 4 clusters.
+
+Principal variables used to differentiate: age, failures, absences, Walc, goout, Medu, Fedu, sex.
+
+# Principal Components Analysis
+
+```{r}
+library(devtools)
+library(ggfortify)
+library(ggplot2)
+
+student_numeric = student %>% select_if(is.numeric) %>% select(-G3,-cluster)
+student_pca = prcomp(student_numeric, center = TRUE, scale = TRUE)
+
+autoplot(student_pca,label=FALSE, loadings=TRUE, loadings.label=TRUE)
+
+student_pca$rotation
+```
+
+**Observations:**
+
+* Component 1 seems to capture and represent primarily the variables Go out and Weekend Alcohol Consumption roughly evenly (they have fairly the same magnitude in coefficient). Other variables that are considered in the Principal Component 1 are age, failures and free time but with lower magnitude. Health and absences are considered but in a pretty lower magnitude. Seems that Component 1 captures the variance primarily of goout and Walc.  Family relationship seems not to be in component 1 with a coefficient close to 0.
+
+# Regression Trees
+
+```{r}
+library(rpart)
+library(rpart.plot)
+student = student %>% select(-cluster)
+student_tree = rpart(G3~., data = student, method = "anova")
+rpart.plot(student_tree, tweak = 1.2, type = 5)
+
+student_tree$variable.importance
+```
+
+**Observations**:
+
+* Some of the most important variables that are used to split the tree are: failures, higher, absences, Walc and schoolsup.
+
+* By looking at the variable importance for the tree, we also see that failures, higher, schoolsup, Walc and absences are the most important variables that are 
+used to make predictions (in that order).
+
+* We see that a number of failures greater or equal to 1 considerably reduces the prediction of a student grade. The same with higher = no.
+
+* High alcohol consumption reduces the prediction of a high grade as well.
+
+* However, something I found somehow odd is that branches with schoolsup = no have considerably higher grades than branches with schoolsup = yes. However the best 2 students in the dataset, both have schoolsup = no.
+
+Since I found statistically significant difference in G3 in both schools, I analyzed those 2 subpopulations deeper.
+
+```{r}
+student$school = schools
+ms = student %>% filter(schools == "MS")
+gp = student %>% filter(schools == "GP")
+
+#Trees with a max depth of 6, otherwise they are too long
+ms_tree = rpart(G3~., data = ms, method = "anova", control = rpart.control(maxdepth = 6))
+gp_tree = rpart(G3~., data = gp, method = "anova",control = rpart.control(maxdepth = 6))
+
+rpart.plot(ms_tree, tweak = 1.1, type = 5)
+ms_tree$variable.importance
+
+rpart.plot(gp_tree, tweak = 1.1, type = 5)
+gp_tree$variable.importance
+
+```
+
+**Observations:**
+
+* Same variables more or less are the most important in the 2 subpopulation trees, however I found much more complicated trees in the subpopulations.
+
+* Variables like failure, absences, higher, age, Walc and schoolsup are also found among the top important variables.
+
+* Some other variables are also used but in a smaller magnitude, like guardian, Fedu and goout.
+
+* In general, variables used for the 2 subpopulations trees are almost the same as the general tree
+
+## Binning - Classification Trees
+
+The Histogram of the Grades (G3) does not show reasonable separations in order to do binning. However, I tried converting the final grade G3 to a pass/no pass grade and performing classifications methods on this variable. To convert G3 to a pass/no pass variable, I set up a threshold of above 60% of the total scale (20) is a pass, and below a no pass.
+
+```{r}
+student = student %>% mutate(pass = case_when(G3 >= 0.6*20 ~ "1", G3 < 0.6*20 ~ "0")) %>% select(-G3,-school)
+student_class_tree = rpart(pass~., data = student, method = "class")
+rpart.plot(student_class_tree, tweak = 1.2, type = 5)
+
+student_class_tree$variable.importance
+```
+
+**Observations:**
+
+* Important variables for classifying a student grade into pass/no pass are also failures, higher and Walc. However, Mjob and studytime have gained more importance when using trees to classify and not to predict the actual grade.
+
+# Final Conclusions and Recommendations
+
+By analyzing all the bivariate relationships, the output to variables relationships, as well as the main features used for the Principal Components Analysis, Clustering and Regression and Classification Trees, we can summarize the most important variables and relationships as follows:
+
+* Clear relationships between variables and G3: 
+ 
+ + Younger age have better grades
+ + High Mothers and fathers education (Medu, Fedu) are related to higher grades
+ + Decrease in failure is related to an increase in grades
+ + Decrease in absences is related to an increase in grades
+ + A desire to pursue higher education is related to higher grades
+ + High traveltime -> low grades
+
+*Top features used for clustering: age, failures, absences, Walc, goout, Medu, Fedu, sex.
+
+*Top features found in PCA: gout, Walc, age, failures, freetime.
+
+*Top features used in Regression trees: failures, higher, absences, Walc and schoolsup.
+
+Summarizing these findings we can state to some extent that the following variables are among the best predictores since they are more frequent among all the techniques:
+
+* Failures, absences and higher
+
+Other really important variables are:
+
+* Age, Walc, Goout, Sex, Medu, Fedu and Schoolsup.
+
+From initally having over 30 attributes, the dataset can be reduced to principally 10 variables or columns, that capture most of the variation of the grades and act as the best predictors.
+
+Focusing on the logical groupings, we can state that the most powerfull predictors can be found in the Academic group (Failures, absences, higher), which is completely reasonable since this focuses mainly on the academic side of the student. Regarding family related attributes, the Parents Education is the most important. When it comes to Life Balance, we see that Alcohol Consumption and Goout times play an important role in explaining a students performance, and regarding demographics, mainly sex and age are the best predictors. 
+
+Most of these variables are really personal attributes that students manage themselves. There are really no recommendations to be made regarding higher, failures, age, goout or Medu. However, some recommendations for the schools, if they want to increase the student's grades, would be:
+
+* Try to lower the amount of absences in the students
+
+* Disencourage the alcohol consumption
+
+* Maybe focus the educational efforts more on males, than on females since males usally have lower grades in the dataset
+
+
+
+
+
+
+
+
+
+
